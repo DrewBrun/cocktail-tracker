@@ -1,0 +1,14 @@
+http://bluetap.com/cocktails/assets/index-zSAKk844.js
+http://bluetap.com/cocktail/assets/index-zSAKk844.js
+
+
+
+index-BU6dWkZx
+
+index-DTL45M8Q
+
+# JS should be application/javascript
+curl -I http://bluetap.com/cocktails/assets/index-DTL45M8Q.js
+
+# CSS should be text/css
+curl -I http://bluetap.com/cocktails/assets/index-BU6dWkZx.css

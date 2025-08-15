@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#f7f2e7" stroke="#e0d5c3" stroke-width="2"></circle>
+  
+  <!-- Martini glass stem -->
+  <line x1="32" y1="36" x2="32" y2="50" stroke="#444" stroke-width="3" stroke-linecap="round"></line>
+  
+  <!-- Martini glass bowl -->
+  <path d="M16 12 L48 12 L32 36 Z" fill="#ffffff" stroke="#444" stroke-width="3" stroke-linejoin="round"></path>
+  
+  <!-- Olive -->
+  <circle cx="38" cy="18" r="4" fill="#78a22f" stroke="#444" stroke-width="2"></circle>
+  <line x1="38" y1="14" x2="38" y2="22" stroke="#444" stroke-width="1"></line>
+  
+  <!-- Base -->
+  <line x1="26" y1="50" x2="38" y2="50" stroke="#444" stroke-width="3" stroke-linecap="round"></line>
+</svg>
