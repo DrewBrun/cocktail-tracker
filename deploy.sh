@@ -1,61 +1,81 @@
+
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUCKET="bluetap.com"
-PREFIX="cocktails"
-DIST_DIR="dist"
-DATA_JSON="public/data/drinks.json"
-OG_IMAGE="public/og-image.png"
+# =============================
+# Config (overridable via env)
+# =============================
+BUCKET="${BUCKET:-bluetap.com}"
+PREFIX="${PREFIX:-cocktails}"         # e.g. cocktails or cocktails2
+DIST_DIR="${DIST_DIR:-dist}"
 
-echo "Building app…"
+# Optional local files for convenience (uploaded if present)
+DATA_JSON="${DATA_JSON:-public/data/drinks.json}"
+FAVICON="${FAVICON:-public/favicon.svg}"
+OG_IMAGE="${OG_IMAGE:-public/og-image.png}"
+
+# =============================
+# Derived settings
+# =============================
+S3_PREFIX="s3://$BUCKET/$PREFIX/"
+BASE_PATH="/${PREFIX}/"                 # vite base
+DATA_BASE="/${PREFIX}/data"            # fetch base for JSON
+
+# =============================
+# Build with Vite base/data paths
+# =============================
+export VITE_BASE_PATH="$BASE_PATH"
+export VITE_DATA_BASE_URL="$DATA_BASE"
+
+echo "Building with VITE_BASE_PATH=$VITE_BASE_PATH and VITE_DATA_BASE_URL=$VITE_DATA_BASE_URL …"
 npm run build
 
-echo "Uploading fingerprinted assets with long cache…"
-aws s3 sync "$DIST_DIR/" "s3://$BUCKET/$PREFIX/" \
+# =============================
+# Upload assets
+# =============================
+aws s3 sync "$DIST_DIR/" "$S3_PREFIX" \
   --delete \
   --exclude "index.html" \
   --cache-control "public, max-age=31536000, immutable"
 
-# --- Force correct content-types for assets (sync doesn't set them) ---
-echo "Correcting content-types for JS/CSS…"
-aws s3 cp "$DIST_DIR/assets/" "s3://$BUCKET/$PREFIX/assets/" \
-  --recursive \
-  --exclude "*" --include "*.js" \
+# Correct MIME types for JS/CSS
+aws s3 cp "$DIST_DIR/assets/" "$S3_PREFIX/assets/" \
+  --recursive --exclude "*" --include "*.js" \
   --content-type "application/javascript" \
   --cache-control "public, max-age=31536000, immutable" \
-  --metadata-directive REPLACE
+  --metadata-directive REPLACE || true
 
-aws s3 cp "$DIST_DIR/assets/" "s3://$BUCKET/$PREFIX/assets/" \
-  --recursive \
-  --exclude "*" --include "*.css" \
+aws s3 cp "$DIST_DIR/assets/" "$S3_PREFIX/assets/" \
+  --recursive --exclude "*" --include "*.css" \
   --content-type "text/css" \
   --cache-control "public, max-age=31536000, immutable" \
-  --metadata-directive REPLACE
-# (Optional) source maps
-# aws s3 cp "$DIST_DIR/assets/" "s3://$BUCKET/$PREFIX/assets/" --recursive --exclude "*" --include "*.map" \
-#   --content-type "application/octet-stream" --cache-control "public, max-age=31536000, immutable" --metadata-directive REPLACE
+  --metadata-directive REPLACE || true
 
-echo "Uploading index.html with no-store cache…"
-aws s3 cp "$DIST_DIR/index.html" "s3://$BUCKET/$PREFIX/index.html" \
+# Upload index.html with no-store
+aws s3 cp "$DIST_DIR/index.html" "${S3_PREFIX}index.html" \
   --content-type "text/html" \
   --cache-control "no-store"
 
-# Optional: data JSON (files-only backend)
+# Optional files
 if [[ -f "$DATA_JSON" ]]; then
-  echo "Uploading data JSON…"
-  aws s3 cp "$DATA_JSON" "s3://$BUCKET/$PREFIX/data/drinks.json" \
+  aws s3 cp "$DATA_JSON" "${S3_PREFIX}data/drinks.json" \
     --content-type "application/json" \
     --cache-control "no-cache"
 fi
 
-# Optional: Open Graph image for link previews
+if [[ -f "$FAVICON" ]]; then
+  aws s3 cp "$FAVICON" "${S3_PREFIX}favicon.svg" \
+    --content-type "image/svg+xml" \
+    --cache-control "public, max-age=31536000, immutable"
+fi
+
 if [[ -f "$OG_IMAGE" ]]; then
-  echo "Uploading OG image…"
-  aws s3 cp "$OG_IMAGE" "s3://$BUCKET/$PREFIX/og-image.png" \
+  aws s3 cp "$OG_IMAGE" "${S3_PREFIX}og-image.png" \
     --content-type "image/png" \
     --cache-control "public, max-age=3600"
 fi
 
 echo
 echo "✅ Deployed to: http://$BUCKET/$PREFIX/"
-echo "    Data URL:   http://$BUCKET/$PREFIX/data/drinks.json"
+echo "   Data URL   : http://$BUCKET/$PREFIX/data/drinks.json"
+
