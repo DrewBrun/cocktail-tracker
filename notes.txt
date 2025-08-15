@@ -12,3 +12,7 @@ curl -I http://bluetap.com/cocktails/assets/index-DTL45M8Q.js
 
 # CSS should be text/css
 curl -I http://bluetap.com/cocktails/assets/index-BU6dWkZx.css
+
+
+
+git remote add origin https://github.com/drewbrun/cocktail-tracker.git
