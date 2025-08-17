@@ -1,52 +1,50 @@
+// src/lib/normalize.ts
 import type { Drink } from "./types";
+import { KNOWN_INGREDIENTS, CATEGORY_RULES } from "../features/drinks/constants";
 
-type Any = Record<string, any>;
+const cleanStr = (v?: string): string => (v ?? "").trim();
 
-const canon = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
-const toBool = (v: any) =>
-  v === true ||
-  v === 1 ||
-  v === -1 ||
-  String(v).trim().toLowerCase() === "yes" ||
-  String(v).trim().toLowerCase() === "true";
+function deriveCategories(ingredients: string[]) {
+  return Object.entries(CATEGORY_RULES)
+    .filter(([, list]) => list.some(item => ingredients.includes(item)))
+    .map(([cat]) => cat);
+}
 
-const flattenOneLevel = (r: Any) => {
-  const ks = Object.keys(r || {});
-  return ks.length === 1 && typeof r[ks[0]] === "object" ? r[ks[0]] : r;
-};
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-const pick = (r: Any, idx: Record<string,string>, names: string[]) => {
-  for (const n of names) {
-    const ck = canon(n);
-    const orig = idx[ck];
-    if (orig != null) {
-      const v = r[orig];
-      if (v !== undefined && v !== null && String(v).length) return v;
-    }
+export function normalize(raw: Drink): Drink {
+  const title = cleanStr(raw.title);
+  const description = cleanStr(raw.description);
+  const recipe = cleanStr(raw.recipe);
+  const comments = cleanStr(raw.comments);
+
+  // NEW: detect ingredients by word-boundary matches anywhere in the text,
+  // so "rye whiskey", "Rittenhouse rye", "whiskey (rye)" all count as "rye".
+  const haystack = `${title}\n${description}\n${recipe}\n${comments}`.toLowerCase();
+
+  const ingSet = new Set<string>();
+  for (const ing of KNOWN_INGREDIENTS) {
+    const re = new RegExp(`\\b${escapeRegExp(ing)}\\b`, "i");
+    if (re.test(haystack)) ingSet.add(ing);
   }
-  return undefined;
-};
 
-export function normalizeDrink(raw: Any): Drink {
-  const r = flattenOneLevel(raw);
-  const idx: Record<string,string> = {};
-  Object.keys(r || {}).forEach(k => { idx[canon(k)] = k; });
-
-  const id = Number(pick(r, idx, ["id","ID","DrinkID","Pk","Key"]));
-  const title = pick(r, idx, ["title","Title","name","Name","drink","Drink"]);
-  const description = pick(r, idx, ["description","Description","summary","Summary","notes","Notes"]);
-  const recipe = pick(r, idx, ["recipe","Recipe","instructions","Instructions","method","Method","directions"]);
-  const comments = pick(r, idx, ["comments","Comments","note","Note"]);
-  const selected = pick(r, idx, ["selected","Selected","isSelected","IsSelected"]);
-  const categoryId = pick(r, idx, ["categoryId","CategoryId","CategoryID","category","Category"]);
+  const ingredients = Array.from(ingSet);
+  const categories = deriveCategories(ingredients);
 
   return {
-    ...(Number.isFinite(id) ? { id } : {}),
-    title: (title ?? "").toString().trim() || "Untitled",
-    description: description ? String(description) : undefined,
-    recipe: recipe ? String(recipe) : undefined,
-    comments: comments ? String(comments) : undefined,
-    selected: selected !== undefined ? toBool(selected) : undefined,
-    categoryId: categoryId !== undefined && categoryId !== "" ? Number(categoryId) : undefined,
+    ...raw,
+    title,
+    description,
+    recipe,
+    comments,
+    ingredients,
+    categories,
   };
 }
+
+
+
+// Optional alias if any file still imports this name:
+export { normalize as normalizeDrink };
