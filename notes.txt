@@ -16,3 +16,6 @@ curl -I http://bluetap.com/cocktails/assets/index-BU6dWkZx.css
 
 
 git remote add origin https://github.com/drewbrun/cocktail-tracker.git
+
+build and deploy:                                                                                                                                                                                
+PREFIX=cocktails2 ./deploy.sh                                               

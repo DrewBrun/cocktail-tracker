@@ -1,12 +1,7 @@
 // src/pages/AdminPage.tsx
-import { useEffect } from "react";
 import { Link } from "react-router-dom";
 
 export default function AdminPage() {
-    // set page title
-  useEffect(() => {
-    document.title = "Cocktail Admin";
-  }, []);
   return (
     <div className="mx-auto max-w-3xl p-6 space-y-6">
       <header>

@@ -47,7 +47,7 @@ export class CocktailDB extends Dexie {
   partyDrinks!: Table<PartyDrink, [string, string]>; // compound key [partyId+drinkId]
 
   constructor() {
-    super("cocktails");
+    super("DrewsCocktailDB");
 
     // v1: existing schema (unchanged)
     this.version(1).stores({
