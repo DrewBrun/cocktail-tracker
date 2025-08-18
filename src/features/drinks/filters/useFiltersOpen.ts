@@ -6,7 +6,7 @@
 //  - Allow optional URL override via ?filters=1 (open) or ?filters=0 (closed)
 //  - Keep URL tidy: remove the param when state === default (closed)
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 // Change the version suffix if you ever want to reset everyone back to default.
@@ -24,9 +24,11 @@ function readInitial(sp: URLSearchParams): boolean {
   if (urlOpen !== null) return urlOpen;
 
   // Then check saved state
-  const saved = localStorage.getItem(KEY);
-  if (saved === "1") return true;
-  if (saved === "0") return false;
+  try {
+    const saved = localStorage.getItem(KEY);
+    if (saved === "1") return true;
+    if (saved === "0") return false;
+  } catch {}
 
   // Default: hidden (closed)
   return false;
@@ -35,17 +37,16 @@ function readInitial(sp: URLSearchParams): boolean {
 export function useFiltersOpen() {
   const [sp, setSp] = useSearchParams();
 
-  // Initialize once from URL -> localStorage -> default(false)
+  // Decide once: URL -> localStorage -> default(false)
   const [open, setOpen] = useState<boolean>(() => readInitial(sp));
-
-  // If a URL override is present, apply it immediately
-  const urlOverride = useMemo(() => readUrlOpen(sp), [sp]);
-  const effectiveOpen = urlOverride ?? open;
+console.debug('[useFiltersOpen] initial open =', open);
 
   // Persist state so the user's choice survives reloads
   useEffect(() => {
-    localStorage.setItem(KEY, effectiveOpen ? "1" : "0");
-  }, [effectiveOpen]);
+    try {
+      localStorage.setItem(KEY, open ? "1" : "0");
+    } catch {}
+  }, [open]);
 
   // Setter: update both state and URL
   const setOpenAll = (next: boolean) => {
@@ -62,5 +63,6 @@ export function useFiltersOpen() {
     setOpen(next);
   };
 
-  return [effectiveOpen, setOpenAll] as const;
+  // Return local state only; no per-render URL override
+  return [open, setOpenAll] as const;
 }

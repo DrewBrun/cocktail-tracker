@@ -1,6 +1,7 @@
 // src/components/FiltersBar.tsx with summary only (toggle removed here — use header button)
 
-import { useMemo, useState } from "react";
+
+import { useMemo, useState, type ReactNode } from "react";
 
 export type FiltersBarProps = {
   selected: boolean;
@@ -15,6 +16,7 @@ export type FiltersBarProps = {
     ingredients?: string[];
   }>;
   compact?: boolean;
+  children?: ReactNode; // NEW
 };
 
 function toggle(list: string[], item: string) {
@@ -31,6 +33,7 @@ export default function FiltersBar({
   onIngredientsChange,
   corpus,
   compact = false,
+  children,
 }: FiltersBarProps) {
   const [ingInput, setIngInput] = useState("");
 
@@ -108,7 +111,12 @@ export default function FiltersBar({
           </button>
         </div>
       </div>
-
+ {/* Custom slot (e.g., Any/All toggle) */}
+     {children && (
+        <div className={compact ? "mt-1" : "mt-2"}>
+          {children}
+        </div>
+      )}
       {/* Active ingredient chips */}
       {ingredients.length > 0 && (
         <div className="flex flex-wrap gap-2">
