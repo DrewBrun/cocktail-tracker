@@ -11,6 +11,8 @@ DIST_DIR="${DIST_DIR:-dist}"
 
 # Optional local files for convenience (uploaded if present)
 DATA_JSON="${DATA_JSON:-public/data/drinks.json}"
+DATA_PARTIES="${DATA_PARTIES:-public/data/parties.json}"            # NEW
+DATA_PARTYDRINKS="${DATA_PARTYDRINKS:-public/data/partyDrinks.json}" # NEW
 FAVICON="${FAVICON:-public/favicon.svg}"
 OG_IMAGE="${OG_IMAGE:-public/og-image.png}"
 
@@ -57,8 +59,23 @@ aws s3 cp "$DIST_DIR/index.html" "${S3_PREFIX}index.html" \
   --cache-control "no-store"
 
 # Optional files
+# Optional files
 if [[ -f "$DATA_JSON" ]]; then
   aws s3 cp "$DATA_JSON" "${S3_PREFIX}data/drinks.json" \
+    --content-type "application/json" \
+    --cache-control "no-cache"
+fi
+
+# NEW: parties.json
+if [[ -f "$DATA_PARTIES" ]]; then
+  aws s3 cp "$DATA_PARTIES" "${S3_PREFIX}data/parties.json" \
+    --content-type "application/json" \
+    --cache-control "no-cache"
+fi
+
+# NEW: partyDrinks.json
+if [[ -f "$DATA_PARTYDRINKS" ]]; then
+  aws s3 cp "$DATA_PARTYDRINKS" "${S3_PREFIX}data/partyDrinks.json" \
     --content-type "application/json" \
     --cache-control "no-cache"
 fi

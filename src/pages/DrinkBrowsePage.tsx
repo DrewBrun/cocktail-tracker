@@ -4,6 +4,7 @@ import { useDrinks } from "../hooks/useDrinks";
 import DrinkGrid from "../components/DrinkGrid";
 import FiltersBar from "../components/FiltersBar";
 import SearchBar from "../components/SearchBar";
+import AnyAllToggle from "../components/AnyAllToggle";
 import { useUrlFilters } from "../features/drinks/filters/useUrlFilters";
 import { useFiltersOpen } from "../features/drinks/filters/useFiltersOpen";
 
@@ -12,24 +13,34 @@ export default function DrinkBrowsePage() {
   const [filters, setFilters] = useUrlFilters();
   const [filtersOpen, setFiltersOpen] = useFiltersOpen();
 
-  const activeAdvanced =
-    (filters.selected ? 1 : 0) + filters.ingredients.length;
+  const mode = filters.ingredientMode ?? "all";
+
+  const activeAdvanced = (filters.selected ? 1 : 0) + (filters.ingredients?.length ?? 0);
 
   const filtered = useMemo(() => {
-    const s = filters.q.trim().toLowerCase();
-    const ing = filters.ingredients.map(x => x.toLowerCase());
+    const s = (filters.q ?? "").trim().toLowerCase();
+    const ing = (filters.ingredients ?? []).map((x) => x.toLowerCase());
 
     return drinks
-      .filter(d => {
+      .filter((d: any) => {
         const blob = `${d.title ?? ""} ${d.description ?? ""} ${d.recipe ?? ""} ${d.comments ?? ""}`.toLowerCase();
         const matchesQ = !s || blob.includes(s);
-        const matchesIng = ing.length === 0 ||
-          ing.some(t => (d.ingredients ?? []).map(x => x.toLowerCase()).includes(t));
-        const matchesFav = !filters.selected || d.selected === true;
+
+        const drinkIngs = (d.ingredients ?? []).map((x: any) =>
+          (typeof x === "string" ? x : x?.name ?? "").toLowerCase()
+        );
+        const matchesIng =
+          ing.length === 0 ||
+          (mode === "all"
+            ? ing.every((t) => drinkIngs.includes(t))
+            : ing.some((t) => drinkIngs.includes(t)));
+
+        const isFav = d.selected === true || d.favorite === true;
+        const matchesFav = !filters.selected || isFav;
         return matchesQ && matchesIng && matchesFav;
       })
-      .sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-  }, [drinks, filters]);
+      .sort((a: any, b: any) => (a.title || "").localeCompare(b.title || ""));
+  }, [drinks, filters, mode]);
 
   return (
     <div className="space-y-4">
@@ -39,10 +50,8 @@ export default function DrinkBrowsePage() {
           <p className="text-sm text-gray-500">Time for a little top up!</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Search is always visible */}
           <SearchBar q={filters.q} onChange={(q) => setFilters({ q })} />
 
-          {/* Toggle only affects advanced filters */}
           <button
             className="rounded-2xl border px-3 py-2 text-sm"
             onClick={() => setFiltersOpen(!filtersOpen)}
@@ -65,17 +74,28 @@ export default function DrinkBrowsePage() {
       {filtersOpen && (
         <FiltersBar
           compact
-          selected={filters.selected}
+          selected={!!filters.selected}
           onSelectedChange={(v) => setFilters({ selected: v })}
-          ingredients={filters.ingredients}
+          ingredients={filters.ingredients ?? []}
           onIngredientsChange={(v) => setFilters({ ingredients: v })}
           corpus={drinks}
-        />
+        >
+          <div className="mt-2">
+            <AnyAllToggle
+              mode={mode}
+              onChange={(m) => setFilters({ ingredientMode: m })}
+            />
+          </div>
+        </FiltersBar>
       )}
 
-      {loading && <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600">Loading drinks…</div>}
-      {error && <div className="rounded-2xl border bg-white p-4 text-sm text-red-700">Failed to load: {error}</div>}
-      {!loading && !error && filtered.length > 0 && <DrinkGrid drinks={filtered} />}
+      {loading && (
+        <div className="rounded-2xl border bg-white p-4 text-sm text-gray-600">Loading drinks…</div>
+      )}
+      {error && (
+        <div className="rounded-2xl border bg-white p-4 text-sm text-red-700">Failed to load: {error}</div>
+      )}
+      {!loading && !error && filtered.length > 0 && <DrinkGrid drinks={filtered as any} />}      
       {!loading && !error && filtered.length === 0 && (
         <div className="rounded-2xl border bg-white p-4 text-center text-gray-500">
           No matches. Try adjusting search or filters.
