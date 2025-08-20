@@ -1,7 +1,9 @@
 // src/pages/PartyAssignPage.tsx
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useDrinks } from "../hooks/useDrinks";
-import { useParties, usePartyAssignments } from "../features/parties/useParties";
+import { useParties } from "../features/parties/useParties";
+import { usePartyAssignments } from "../features/parties/usePartyAssignments";
+
 import PartyPicker from "../components/PartyPicker";
 
 type ListRow = {
@@ -101,7 +103,7 @@ export default function PartyAssignPage() {
   const toggleAllVisible = useCallback(async () => {
     if (!partyId) return;
     if (allAssignedVisible) {
-      const next = assigned.filter((k) => !selectKeysVisible.includes(k));
+      const next = assigned.filter((k: string) => !selectKeysVisible.includes(k));
       await setMany(next);
     } else {
       const union = Array.from(new Set([...assigned, ...selectKeysVisible]));

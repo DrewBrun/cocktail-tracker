@@ -4,6 +4,8 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import { db, type Drink as DrinkRow, makeSlug } from "../db";
 import type { Drink as DrinkRaw } from "../../../lib/types";
 import { normalize } from "../../../lib/normalize";
+import { upsertDrink } from "../../data/writeApi";
+import { fetchAllDrinks } from "../dataSource";
 
 // --- Types ---------------------------------------------------------------
 
@@ -110,6 +112,9 @@ export default function DrinkEditorPage() {
 
   const [form, setForm] = useState<FormState>(EMPTY);
 
+  // Track the original slug to help server-side upsert distinguish update vs create
+  const [originalSlug, setOriginalSlug] = useState<string | null>(null);
+
   // Index list for quick navigation (use slug for stable links)
   const [allDrinks, setAllDrinks] =
     useState<Array<Pick<DrinkRow, "id" | "title" | "slug">>>([]);
@@ -121,19 +126,41 @@ export default function DrinkEditorPage() {
     if (initial) setForm(initial);
   }, [initial]);
 
+  // Resolve and remember the current drink's stored slug (not just the URL fragment)
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      if (!idOrSlug || isNew) {
+        setOriginalSlug(null);
+        return;
+      }
+      let row: DrinkRow | undefined;
+      if (/^\d+$/.test(idOrSlug)) {
+        row = await db.drinks.get(Number(idOrSlug));
+      } else {
+        row = await db.drinks.where("slug").equals(idOrSlug).first();
+      }
+      if (!cancel) setOriginalSlug(row?.slug ?? idOrSlug);
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [idOrSlug, isNew]);
+
   // Load full index (id + title + slug) for quick links
   useEffect(() => {
     let cancel = false;
     (async () => {
       const rows = await db.drinks.orderBy("title").toArray();
-      if (!cancel)
+      if (!cancel) {
         setAllDrinks(
           rows.map((r) => ({
-            id: r.id!,
+            id: r.id,
             title: r.title ?? "",
-            slug: r.slug ?? "",
+            slug: r.slug ? String(r.slug) : "",
           }))
         );
+      }
     })();
     return () => {
       cancel = true;
@@ -145,44 +172,101 @@ export default function DrinkEditorPage() {
   const canSave =
     form.title.trim().length > 0 && form.recipe.trim().length > 0 && !saving;
 
+  // Pull fresh drinks from remote, normalize slugs, write to Dexie, refresh sidebar list
+  async function resyncFromRemoteAndRefreshList() {
+    const raw = await fetchAllDrinks();
+    const arr = Array.isArray((raw as any)?.drinks) ? (raw as any).drinks : (raw as any);
+
+    const normalizedList = (arr as any[]).map((d) => {
+      const nd0 = normalize(d) as DrinkRaw & { ingredients?: string[]; categories?: string[] };
+      return { ...nd0, slug: makeSlug(nd0.title) };
+    });
+
+    await db.transaction("rw", db.drinks, async () => {
+      await db.drinks.clear();
+      await db.drinks.bulkAdd(normalizedList as any);
+    });
+
+    const rows = await db.drinks.orderBy("title").toArray();
+    setAllDrinks(
+      rows.map((r) => ({
+        id: r.id,
+        title: r.title ?? "",
+        slug: r.slug ? String(r.slug) : "",
+      }))
+    );
+  }
+
   async function handleSave() {
     if (!canSave) return;
     setSaving(true);
     setSaveError(null);
+
     try {
       const now = Date.now();
       const nd = normalize(toRaw(form));
       const slug = makeSlug(nd.title);
 
       if (isNew) {
+        // --- CREATE -------------------------------------------------------
         const row: DrinkRow = {
           ...(nd as DrinkRaw & { ingredients?: string[]; categories?: string[] }),
           slug,
           createdAt: now,
           updatedAt: now,
         };
+
+        // 1) Local write (instant UX)
         await db.drinks.add(row);
-        // Navigate to the SLUG route (stable across imports)
+
+        // 2) Remote write
+        await upsertDrink(row);
+
+        // 3) Re-sync local cache + refresh index
+        await resyncFromRemoteAndRefreshList();
+
+        // 4) Navigate to the new slug
         navigate(`/cheers42/${slug}`);
       } else {
-        const row: Partial<DrinkRow> = {
+        // --- UPDATE -------------------------------------------------------
+        // Find existing row (we need createdAt & the real stored slug)
+        let existingRow: DrinkRow | undefined;
+        if (/^\d+$/.test(idOrSlug!)) {
+          existingRow = await db.drinks.get(Number(idOrSlug));
+        } else {
+          existingRow = await db.drinks.where("slug").equals(idOrSlug!).first();
+        }
+
+        if (!existingRow || existingRow.id == null) {
+          setSaveError("Could not update: drink not found.");
+          setSaving(false);
+          return;
+        }
+
+        const newSlug = slug;
+        const payload: Partial<DrinkRow> = {
           ...(nd as DrinkRaw & { ingredients?: string[]; categories?: string[] }),
-          slug,
+          slug: newSlug,
+          createdAt: existingRow.createdAt ?? now, // preserve original createdAt
           updatedAt: now,
         };
 
-        if (idOrSlug && /^\d+$/.test(idOrSlug)) {
-          await db.drinks.update(Number(idOrSlug), row);
-          navigate(`/cheers42/${slug}`);
-        } else if (idOrSlug) {
-          const existing = await db.drinks.where("slug").equals(idOrSlug).first();
-          if (existing?.id != null) {
-            await db.drinks.update(existing.id, row);
-            navigate(`/cheers42/${slug}`);
-          } else {
-            setSaveError("Could not update: drink not found.");
-          }
-        }
+        // 1) Local update
+        await db.drinks.update(existingRow.id, payload);
+
+        // 2) Remote write — include prevSlug if the slug changed
+        const prevSlug =
+          originalSlug && originalSlug !== newSlug ? originalSlug : undefined;
+        await upsertDrink({
+          ...(payload as any),
+          prevSlug, // let Lambda treat this as a rename from prevSlug -> slug
+        });
+
+        // 3) Re-sync local cache + refresh index
+        await resyncFromRemoteAndRefreshList();
+
+        // 4) Navigate to (possibly changed) slug
+        navigate(`/cheers42/${newSlug}`);
       }
     } catch (e: any) {
       setSaveError(e?.message ?? "Failed to save");
@@ -235,7 +319,9 @@ export default function DrinkEditorPage() {
           <button
             onClick={handleSave}
             disabled={!canSave}
-            className={`rounded-xl border px-3 py-2 text-sm ${canSave ? "hover:bg-gray-50" : "opacity-50"}`}
+            className={`rounded-xl border px-3 py-2 text-sm ${
+              canSave ? "hover:bg-gray-50" : "opacity-50"
+            }`}
           >
             {saving ? "Saving…" : "Save"}
           </button>
@@ -267,7 +353,11 @@ export default function DrinkEditorPage() {
               className="w-full resize-y rounded-xl border p-2"
             />
           </FormRow>
-          <FormRow label="Recipe" required help="One ingredient per line is fine. Quantities optional.">
+          <FormRow
+            label="Recipe"
+            required
+            help="One ingredient per line is fine. Quantities optional."
+          >
             <textarea
               value={form.recipe}
               onChange={(e) => setForm((f) => ({ ...f, recipe: e.target.value }))}
@@ -333,11 +423,11 @@ export default function DrinkEditorPage() {
         <div className="max-h-64 overflow-auto rounded-xl border">
           <ul className="divide-y text-sm">
             {allDrinks
-              .filter((d) => d.title.toLowerCase().includes(filter.toLowerCase()))
+              .filter((d) => (d.title ?? "").toLowerCase().includes(filter.toLowerCase()))
               .map((d) => (
-                <li key={d.id}>
+                <li key={d.slug || String(d.id) || d.title}>
                   <Link
-                    to={`/cheers42/${d.slug || d.id}`} // prefer slug, fallback id
+                    to={`/cheers42/${d.slug || String(d.id)}`} // prefer slug, fallback id
                     className="block px-3 py-2 hover:bg-gray-50"
                   >
                     {d.title || "(untitled)"}
@@ -372,9 +462,7 @@ function FormRow({
       <div className="mb-1 flex items-center gap-2 text-sm">
         <span className="font-medium">{label}</span>
         {required && (
-          <span className="rounded bg-red-50 px-2 py-0.5 text-xs text-red-700">
-            required
-          </span>
+          <span className="rounded bg-red-50 px-2 py-0.5 text-xs text-red-700">required</span>
         )}
         {help && <span className="text-xs text-gray-500">{help}</span>}
       </div>
