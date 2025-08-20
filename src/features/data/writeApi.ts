@@ -41,14 +41,41 @@ async function postJSON<T>(path: string, payload: unknown): Promise<T> {
   // If your Lambda returns no body, change to: return {} as T;
   return res.json() as Promise<T>;
 }
+// Accept both shapes:
+//   A) { slug?, prevSlug?, drink: {...} }
+//   B) { title?, name?, slug?, prevSlug?, ...other fields }
+export type UpsertDrinkArg =
+  | { slug?: string; prevSlug?: string; drink: Record<string, unknown> }
+  | (Record<string, unknown> & {
+      title?: string;
+      name?: string;
+      slug?: string;
+      prevSlug?: string;
+    });
 
-export type UpsertDrinkInput = {
-  slug: string;
-  drink: unknown;
-};
-export async function upsertDrink(input: UpsertDrinkInput) {
-  return postJSON<{ ok: true }>("/drinks", input);
+export async function upsertDrink(arg: UpsertDrinkArg) {
+  // Normalize to a flat payload for the Lambda
+  const payload =
+    "drink" in arg
+      ? {
+          ...(arg.drink as Record<string, unknown>),
+          ...(arg.slug ? { slug: arg.slug } : {}),
+          ...(arg.prevSlug ? { prevSlug: arg.prevSlug } : {}),
+        }
+      : (arg as Record<string, unknown>);
+
+  // The writer accepts either name or title (name takes precedence).
+  const nameOrTitle =
+    (payload["name"] as string | undefined) ||
+    (payload["title"] as string | undefined);
+
+  if (!nameOrTitle || String(nameOrTitle).trim() === "") {
+    throw new Error("title (or name) required");
+  }
+
+  return postJSON<{ ok: true }>("/drinks", payload);
 }
+
 
 export type UpsertPartyInput = { id: string; party: unknown };
 export async function upsertParty(input: UpsertPartyInput) {
