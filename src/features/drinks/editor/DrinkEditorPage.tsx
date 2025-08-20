@@ -220,7 +220,10 @@ export default function DrinkEditorPage() {
         await db.drinks.add(row);
 
         // 2) Remote write
-        await upsertDrink(row);
+        await upsertDrink({
+          slug: row.slug ?? makeSlug(row.title),
+          drink: row,
+        });
 
         // 3) Re-sync local cache + refresh index
         await resyncFromRemoteAndRefreshList();

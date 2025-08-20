@@ -1,0 +1,91 @@
+http://bluetap.com/cocktails/assets/index-zSAKk844.js
+http://bluetap.com/cocktail/assets/index-zSAKk844.js
+
+
+
+index-BU6dWkZx
+
+index-DTL45M8Q
+
+# JS should be application/javascript
+curl -I http://bluetap.com/cocktails/assets/index-DTL45M8Q.js
+
+# CSS should be text/css
+curl -I http://bluetap.com/cocktails/assets/index-BU6dWkZx.css
+
+
+
+git remote add origin https://github.com/drewbrun/cocktail-tracker.git
+
+build and deploy:                                                                                                                                                                                
+PREFIX=cocktails2 ./deploy.sh                                               
+
+
+
+
+aws lambda create-function \
+  --function-name cocktails-writer \
+  --runtime nodejs18.x \
+  --role arn:aws:iam::<ACCOUNT_ID>:role/cocktails-writer-role \
+  --handler index.handler \
+  --zip-file fileb://cocktails-writer.zip \
+  --environment "Variables={BUCKET=bluetap.com,PREFIX=cocktails2/data,ADMIN_TOKEN=cheers42,ALLOW_ORIGIN=https://bluetap.com}"
+
+
+andrewbrunetti@Mac CocktailLambda % aws sts get-caller-identity
+
+{
+    "UserId": "799702714846",
+    "Account": "799702714846",
+    "Arn": "arn:aws:iam::799702714846:root"
+}
+
+
+aws lambda create-function \
+  --function-name cocktails-writer \
+  --runtime nodejs18.x \
+  --role arn:aws:iam::799702714846:role/cocktails-writer-role \
+  --handler index.handler \
+  --zip-file fileb://cocktails-writer.zip \
+  --environment "Variables={BUCKET=bluetap.com,PREFIX=cocktails2/data,ADMIN_TOKEN=cheers42,ALLOW_ORIGIN=https://bluetap.com}"
+
+
+aws lambda create-function-url-config \
+  --function-name cocktails-writer \
+  --auth-type NONE \
+  --cors "AllowOrigins=https://bluetap.com,AllowMethods=POST,OPTIONS,AllowHeaders=Content-Type x-admin-token"
+
+
+   "FunctionUrl": "https://t3wjbzi3j66drpyanh7lxexaey0qkwbd.lambda-url.us-east-2.on.aws/",
+    "FunctionArn": "arn:aws:lambda:us-east-2:799702714846:function:cocktails-writer",
+
+
+
+export VITE_API_BASE_URL=https://t3wjbzi3j66drpyanh7lxexaey0qkwbd.lambda-url.us-east-2.on.aws/
+export VITE_ADMIN_TOKEN=cheers42
+
+export VITE_API_BASE_URL="https://t3wjbzi3j66drpyanh7lxexaey0qkwbd.lambda-url.us-east-2.on.aws"
+export VITE_ADMIN_TOKEN="cheers42"
+
+curl -i -X POST "$VITE_API_BASE_URL/drinks" \
+  -H "Content-Type: application/json" \
+  -H "x-admin-token: $VITE_ADMIN_TOKEN" \
+  -d '{"name":"Test Spritz","slug":"test-spritz","ingredients":["prosecco","aperol","soda"]}'
+
+
+
+export FUNCTION_NAME="cocktails-writer "
+export AWS_REGION="us-east-2"
+export BUCKET="bluetap.com"
+export PREFIX="cocktails2/data"
+export ADMIN_TOKEN="cheers42"  
+
+bash deploy_lambda.sh
+
+
+fetch("https://t3wjbzi3j66drpyanh7lxexaey0qkwbd.lambda-url.us-east-2.on.aws/", { method: "HEAD" })
+  .then(r => console.log("writer reachable?", r.ok))
+  .catch(e => console.error(e));
+
+
+VITE_API_BASE_URL=https://t3wjbzi3j66drpyanh7lxexaey0qkwbd.lambda-url.us-east-2.on.aws/
