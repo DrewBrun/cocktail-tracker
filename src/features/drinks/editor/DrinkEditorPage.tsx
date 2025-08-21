@@ -230,7 +230,12 @@ export default function DrinkEditorPage() {
         });
 
         // 3) Re-sync local cache + refresh index
-        await resyncFromRemoteAndRefreshList();
+        try {
+  await resyncFromRemoteAndRefreshList();
+} catch (e) {
+  console.warn("Re-sync failed (will show on next load):", e);
+}
+navigate(`/cheers42/${slug}`);
 
         // 4) Navigate to the new slug
         navigate(`/cheers42/${slug}`);
@@ -270,7 +275,12 @@ export default function DrinkEditorPage() {
         });
 
         // 3) Re-sync local cache + refresh index
-        await resyncFromRemoteAndRefreshList();
+        try {
+  await resyncFromRemoteAndRefreshList();
+} catch (e) {
+  console.warn("Re-sync failed (will show on next load):", e);
+}
+navigate(`/cheers42/${slug}`);
 
         // 4) Navigate to (possibly changed) slug
         navigate(`/cheers42/${newSlug}`);

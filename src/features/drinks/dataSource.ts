@@ -9,9 +9,21 @@ function baseUrl() {
 }
 
 async function fetchRaw(path: string): Promise<any> {
-  const res = await fetch(`${baseUrl()}/${path}`, { cache: "no-store" as RequestCache });
-  if (!res.ok) throw new Error(`${path} ${res.status}`);
-  return res.json();
+  const base = `${baseUrl()}/${path}`;
+  const makeURL = () => base + (base.includes("?") ? "&" : "?") + "_=" + Date.now();
+
+  let lastErr: unknown = null;
+  for (const delay of [0, 250, 700]) {
+    if (delay) await new Promise((r) => setTimeout(r, delay));
+    try {
+      const res = await fetch(makeURL(), { cache: "no-store" as RequestCache });
+      if (!res.ok) throw new Error(`${path} ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr ?? new Error("Failed to fetch");
 }
 
 export async function fetchAllDrinks(): Promise<Drink[]> {
