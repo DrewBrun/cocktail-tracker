@@ -228,7 +228,13 @@ export default function DrinkEditorPage() {
           slug: row.slug ?? makeSlug(row.title),
           drink: row,
         });
-
+// write locally right away so UI updates even if re-fetch lags
+const newId = await db.drinks.add(row as any);
+setAllDrinks(prev => {
+  const next = [...prev, { id: newId, title: row.title ?? "", slug }];
+  next.sort((a, b) => a.title.localeCompare(b.title));
+  return next;
+});
         // 3) Re-sync local cache + refresh index
         try {
   await resyncFromRemoteAndRefreshList();
@@ -241,50 +247,64 @@ navigate(`/cheers42/${slug}`);
         navigate(`/cheers42/${slug}`);
       } else {
         // --- UPDATE -------------------------------------------------------
-        // Find existing row (we need createdAt & the real stored slug)
-        let existingRow: DrinkRow | undefined;
-        if (/^\d+$/.test(idOrSlug!)) {
-          existingRow = await db.drinks.get(Number(idOrSlug));
-        } else {
-          existingRow = await db.drinks.where("slug").equals(idOrSlug!).first();
-        }
-
-        if (!existingRow || existingRow.id == null) {
-          setSaveError("Could not update: drink not found.");
-          setSaving(false);
-          return;
-        }
-
-        const newSlug = slug;
-        const payload: Partial<DrinkRow> = {
-          ...(nd as DrinkRaw & { ingredients?: string[]; categories?: string[] }),
-          slug: newSlug,
-          createdAt: existingRow.createdAt ?? now, // preserve original createdAt
-          updatedAt: now,
-        };
-
-        // 1) Local update
-        await db.drinks.update(existingRow.id, payload);
-
-        // 2) Remote write — include prevSlug if the slug changed
-        const prevSlug =
-          originalSlug && originalSlug !== newSlug ? originalSlug : undefined;
-        await upsertDrink({
-          ...(payload as any),
-          prevSlug, // let Lambda treat this as a rename from prevSlug -> slug
-        });
-
-        // 3) Re-sync local cache + refresh index
-        try {
-  await resyncFromRemoteAndRefreshList();
-} catch (e) {
-  console.warn("Re-sync failed (will show on next load):", e);
+      
+// --- UPDATE -------------------------------------------------------
+let existingRow: DrinkRow | undefined;
+if (/^\d+$/.test(idOrSlug!)) {
+  existingRow = await db.drinks.get(Number(idOrSlug));
+} else {
+  existingRow = await db.drinks.where("slug").equals(idOrSlug!).first();
 }
-navigate(`/cheers42/${slug}`);
+if (!existingRow || existingRow.id == null) {
+  setSaveError("Could not update: drink not found.");
+  setSaving(false);
+  return;
+}
 
-        // 4) Navigate to (possibly changed) slug
-        navigate(`/cheers42/${newSlug}`);
-      }
+const newSlug = slug; // computed earlier from nd.title
+const updatedRow: DrinkRow = {
+  ...existingRow,
+  ...(nd as DrinkRaw & { ingredients?: string[]; categories?: string[] }),
+  slug: newSlug,
+  createdAt: existingRow.createdAt ?? now, // preserve original
+  updatedAt: now,
+};
+
+// 1) Local upsert so UI updates immediately
+await db.drinks.put(updatedRow as any);
+
+// 2) Remote write — include prevSlug if slug changed
+const prevSlug =
+  originalSlug && originalSlug !== newSlug ? originalSlug : undefined;
+await upsertDrink({ ...updatedRow, prevSlug });
+
+// 3) Update in-memory list now (don’t depend on Dexie query)
+setAllDrinks((prev) => {
+  const prevSlugForFilter = (originalSlug ?? existingRow.slug) ?? newSlug;
+  const others = prev.filter(
+    (d) => d.slug !== prevSlugForFilter && d.slug !== newSlug
+  );
+  const next = [
+    ...others,
+    { id: (existingRow as any).id ?? 0, title: updatedRow.title ?? "", slug: newSlug },
+  ];
+  next.sort((a, b) => a.title.localeCompare(b.title));
+  return next;
+});
+
+// 4) Background re-sync (don’t block/save UX)
+setTimeout(() => {
+  resyncFromRemoteAndRefreshList().catch((e) =>
+    console.warn("Background re-sync failed:", e)
+  );
+}, 1200);
+
+// 5) Navigate once to the (possibly changed) slug
+navigate(`/cheers42/${newSlug}`);
+
+
+
+      ///end of update branch
     } catch (e: any) {
       setSaveError(e?.message ?? "Failed to save");
     } finally {
