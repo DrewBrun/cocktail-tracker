@@ -122,9 +122,13 @@ export default function DrinkEditorPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+
+  
   useEffect(() => {
     if (initial) setForm(initial);
   }, [initial]);
+
+
 
   // Resolve and remember the current drink's stored slug (not just the URL fragment)
   useEffect(() => {

@@ -89,3 +89,22 @@ fetch("https://t3wjbzi3j66drpyanh7lxexaey0qkwbd.lambda-url.us-east-2.on.aws/", {
 
 
 VITE_API_BASE_URL=https://t3wjbzi3j66drpyanh7lxexaey0qkwbd.lambda-url.us-east-2.on.aws/
+
+
+# from your repo root (adjust the input path to your actual drinks.json)
+node migrate-drinks.js public/data/drinks.json > drinks.migrated.json
+
+# sanity-check the result (optional, if you have jq)
+jq -e . drinks.migrated.json && echo "JSON OK"
+
+# back up and replace
+cp path/to/drinks.json path/to/drinks.json.bak
+mv drinks.migrated.json path/to/drinks.json
+
+# rebuild and deploy
+PREFIX=cocktails2 ./deploy.sh
+
+
+aws lambda update-function-code \
+  --function-name cocktails-writer \
+  --zip-file fileb://function.zip
