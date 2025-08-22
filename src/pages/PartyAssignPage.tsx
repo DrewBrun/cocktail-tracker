@@ -89,7 +89,10 @@ export default function PartyAssignPage() {
 
   // Bulk helpers use a “select key” per row (prefer id, fallback slug)
   const selectKeysVisible = useMemo(
-    () => list.map((r) => r.idKey || r.slugKey).filter(Boolean) as string[],
+  // Prefer slug (what the backend and exported data use) so add/remove posts the
+  // same identifiers the remote expects. Fall back to numeric id only if slug
+  // is not available.
+  () => list.map((r) => r.slugKey || r.idKey).filter(Boolean) as string[],
     [list]
   );
 
@@ -134,7 +137,8 @@ export default function PartyAssignPage() {
     setPartyId(p.id);
     setShowCreate(false);
     setNewName(""); setNewDate(""); setNewTagline(""); setNewTitle("");
-  }, [newName, newDate, newTagline, newTitle, createParty]);
+    await reload(); // ensure dropdown refreshes with new party
+  }, [newName, newDate, newTagline, newTitle, createParty, reload]);
 
   const onEditParty = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,7 +162,9 @@ export default function PartyAssignPage() {
         (!!row.idKey && assignedSet.has(row.idKey)) ||
         (!!row.slugKey && assignedSet.has(row.slugKey));
 
-      const selectKey = row.idKey || row.slugKey;
+      // Use slug as the primary key for add/remove so the UI talks the same
+      // identifier space as the backend (which stores partyDrinks by slug).
+      const selectKey = row.slugKey || row.idKey;
 
       return (
         <label
@@ -252,6 +258,7 @@ export default function PartyAssignPage() {
             onClick={() => { setShowCreate((v) => !v); setShowEdit(false); }}
             title="Create a new party"
             aria-pressed={showCreate}
+            style={{ display: 'inline-block' }}
           >
             {showCreate ? "Cancel" : "New party"}
           </button>
@@ -260,7 +267,7 @@ export default function PartyAssignPage() {
 
       {/* Status */}
       <div className="text-xs text-gray-500">
-        Parties: {loadingParties ? "loading…" : parties.length}
+        Parties: {loadingParties ? "loading…" : (Array.isArray(parties) ? parties.length : 0)}
         {partiesError && <span className="ml-2 text-red-600">Failed to load parties</span>}
       </div>
 

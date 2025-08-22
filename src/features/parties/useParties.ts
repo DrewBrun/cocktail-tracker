@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { db } from "../drinks/db";
+import { upsertParty } from "../data/writeApi";
 import type { Party, PartyID, PartyDrink } from "../drinks/db";
 
 const DATA_BASE = import.meta.env.VITE_DATA_BASE_URL || "/data";
@@ -14,16 +15,24 @@ export function useParties() {
     try {
       // Try remote JSON first
       const res = await fetch(`${DATA_BASE}/parties.json`, { cache: "no-cache" });
+      let remote: Party[] = [];
       if (res.ok) {
-        const remote: Party[] = await res.json();
-        setParties(remote.slice().sort((a,b)=>(a.name||"").localeCompare(b.name||"")));
+        remote = await res.json();
+      }
+      // Only overwrite Dexie if remote has parties
+      if (remote && remote.length > 0) {
+        setParties(
+          remote
+            .filter(p => p && typeof p.name === "string" && p.name.trim() !== "")
+            .sort((a,b)=>(a.name||"").localeCompare(b.name||""))
+        );
         // hydrate Dexie (optional but keeps UI consistent)
         await db.transaction("rw", db.parties, async () => {
           await db.parties.clear();
-          if (remote.length) await db.parties.bulkPut(remote);
+          await db.parties.bulkPut(remote);
         });
       } else {
-        // fallback to Dexie (dev/offline)
+        // fallback to Dexie (dev/offline or remote empty)
         const local = await db.parties.toArray();
         local.sort((a,b)=>(a.name||"").localeCompare(b.name||""));
         setParties(local);
@@ -43,15 +52,47 @@ export function useParties() {
   // In Path A: treat writes as "local draft" only; you’ll export → upload to publish
   const createParty = useCallback(async (input: { name: string; date?: string|null; tagline?: string|null; title?: string|null }) => {
     const now = Date.now();
-    const id: PartyID = String(now);
-    const p: Party = { id, name: input.name.trim(), date: input.date ?? null, tagline: input.tagline ?? null, title: input.title ?? null, createdAt: now, updatedAt: now };
+    // Generate slug from name (same as migration script)
+    function toSlug(s: string) {
+      return String(s || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+    }
+    const slug = toSlug(input.name.trim());
+    const p: Party = {
+      id: String(now), // use timestamp string for id
+      name: input.name.trim(),
+      date: input.date ?? null,
+      tagline: input.tagline ?? null,
+      title: input.title ?? null,
+      slug,
+      createdAt: now,
+      updatedAt: now
+    };
     await db.parties.put(p);
-    await reload(); // shows local version until you publish
+    // Try to publish to writer API if available; if it fails, keep local draft.
+    try {
+      await upsertParty({ id: p.id, party: p });
+      // If writer succeeded, reload remote copy so UI reflects server canonical data.
+      await reload();
+    } catch (e: any) {
+      console.warn("upsertParty failed; keeping local only", e?.message ?? e);
+      // still reload to show local data
+      await reload();
+    }
     return p;
   }, [reload]);
 
   const updateParty = useCallback(async (id: PartyID, patch: Partial<Party>) => {
     await db.parties.update(id, { ...patch, updatedAt: Date.now() });
+    // Attempt to push the updated party to the writer so remote stays in sync.
+    try {
+      const party = await db.parties.get(id as any);
+      if (party) await upsertParty({ id, party });
+    } catch (e: any) {
+      console.warn("upsertParty (update) failed; local update only", e?.message ?? e);
+    }
     await reload();
   }, [reload]);
 

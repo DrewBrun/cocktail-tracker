@@ -12,6 +12,7 @@ export type Party = {
   date?: string | null;   // "YYYY-MM-DD"
   tagline?: string | null;
   title?: string | null;  // ⬅️ was "notes"; now "title"
+  slug?: string;          // normalized party name for remote compatibility
   createdAt: number;      // ms
   updatedAt: number;      // ms
 };
@@ -61,11 +62,11 @@ export class CocktailDB extends Dexie {
       partyDrinks: "[partyId+drinkId], partyId, drinkId, addedAt",
     });
 
-    // v3: migrate notes -> title on party rows and index 'title'
+    // v3: migrate notes -> title on party rows and index 'title' and 'slug'
     this.version(3).stores({
       drinks: "++id, slug, title, *ingredients, *categories, updatedAt",
       meta: "&key",
-      parties: "id, name, date, createdAt, updatedAt, tagline, title",
+      parties: "id, name, date, createdAt, updatedAt, tagline, title, slug",
       partyDrinks: "[partyId+drinkId], partyId, drinkId, addedAt",
     }).upgrade(async (tx) => {
       const table = tx.table("parties");
@@ -75,6 +76,13 @@ export class CocktailDB extends Dexie {
         }
         if (row && Object.prototype.hasOwnProperty.call(row, "notes")) {
           delete row.notes;
+        }
+        // Add slug if missing
+        if (row && typeof row.name === "string" && !row.slug) {
+          row.slug = (row.name ?? "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/(^-|-$)/g, "");
         }
       });
     });
