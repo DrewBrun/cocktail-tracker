@@ -19,6 +19,10 @@ export default function AdminPage() {
         <Link to="/cheers42/reports" className="rounded-2xl border px-4 py-3 hover:bg-gray-50">
           📊 Reports
         </Link>
+
+        <Link to="/cheers42/parties" className="rounded-2xl border px-4 py-3 hover:bg-gray-50">
+          🎉 Parties
+        </Link>
       </nav>
     </div>
   );

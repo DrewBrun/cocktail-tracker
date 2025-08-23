@@ -4,7 +4,7 @@ import Layout from "./Layout";
 import DrinkBrowsePage from "../pages/DrinkBrowsePage";
 import DrinkEditorPage from "../features/drinks/editor/DrinkEditorPage";
 import ImportPage from "../features/drinks/import/ImportPage";
-import PartyAssignPage from "../pages/PartyAssignPage";
+
 
 // ⬇️ add these
 import ReportsPage from "../pages/ReportsPage";
@@ -23,7 +23,7 @@ export const router = createHashRouter([
       // edit by numeric id OR slug
       { path: "cheers42/:idOrSlug", element: <DrinkEditorPage /> },
 
-      { path: "cheers42/parties/assign", element: <PartyAssignPage /> },
+
 
       // reports (public route, but don't link it if you want it "quiet")
       { path: "cheers42/reports", element: <ReportsPage /> },
@@ -32,6 +32,10 @@ export const router = createHashRouter([
       { path: "cheers42/admin", element: <AdminPage /> },
 
       { path: "cheers42/import", element: <ImportPage /> },
+
+   
+
+
     ],
   },
 ]);
