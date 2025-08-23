@@ -5,7 +5,8 @@ import DrinkBrowsePage from "../pages/DrinkBrowsePage";
 import DrinkEditorPage from "../features/drinks/editor/DrinkEditorPage";
 import ImportPage from "../features/drinks/import/ImportPage";
 
-
+import PartyManagerPage from "../pages/PartyManagerPage";
+import PartyMenuPage from "../pages/PartyMenuPage";
 // ⬇️ add these
 import ReportsPage from "../pages/ReportsPage";
 import AdminPage from "../pages/AdminPage";
@@ -33,7 +34,14 @@ export const router = createHashRouter([
 
       { path: "cheers42/import", element: <ImportPage /> },
 
-   
+   {
+  path: "parties",
+  element: <PartyManagerPage />,
+},
+{
+  path: "parties/:id/menu",
+  element: <PartyMenuPage />,
+},
 
 
     ],

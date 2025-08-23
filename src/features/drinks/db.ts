@@ -94,6 +94,32 @@ export const db = new CocktailDB();
 // OPTIONAL: expose for console debugging/imports
 if (typeof window !== "undefined") (window as any).db = db;
 
+
+// ---- Import helpers for parties & partyDrinks -------------------------------
+export async function importParties(parties: Party[]) {
+  const now = Date.now();
+  await db.transaction('rw', db.parties, async () => {
+    for (const p of parties) {
+      // ensure timestamps & slug
+      const createdAt = p.createdAt ?? now;
+      const updatedAt = p.updatedAt ?? now;
+      const slug = p.slug ?? makeSlug(p.title ?? p.name);
+      await db.parties.put({ ...p, createdAt, updatedAt, slug });
+    }
+  });
+}
+
+export async function importPartyDrinks(rows: { partyId: PartyID; drinkId: string }[]) {
+  await db.transaction('rw', db.partyDrinks, async () => {
+    for (const r of rows) {
+      // prevent dupes
+      const exists = await db.partyDrinks.where({ partyId: r.partyId, drinkId: r.drinkId }).first();
+      if (!exists) await db.partyDrinks.add({ ...r, addedAt: Date.now() });
+    }
+  });
+}
+
+
 export function makeSlug(title?: string) {
   return (title ?? "")
     .toLowerCase()

@@ -13,16 +13,11 @@ export default function AdminPage() {
         <Link to="/cheers42/new" className="rounded-2xl border px-4 py-3 hover:bg-gray-50">
           🥃 Drink Editor (new)
         </Link>
-        <Link to="/cheers42/parties/assign" className="rounded-2xl border px-4 py-3 hover:bg-gray-50">
-          🎉 Party Editor / Assign
-        </Link>
         <Link to="/cheers42/reports" className="rounded-2xl border px-4 py-3 hover:bg-gray-50">
           📊 Reports
         </Link>
-
-        <Link to="/cheers42/parties" className="rounded-2xl border px-4 py-3 hover:bg-gray-50">
-          🎉 Parties
-        </Link>
+<Link className="block px-4 py-3 hover:bg-gray-50" to="/parties">🎉 Parties</Link>
+      
       </nav>
     </div>
   );
