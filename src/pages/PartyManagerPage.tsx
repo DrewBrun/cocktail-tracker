@@ -1,16 +1,43 @@
 // src/pages/PartyManagerPage.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { db, type Party, type PartyID, makeSlug } from "../features/drinks/db";
 import { useDrinks } from "../hooks/useDrinks";
 import { useParties } from "../features/parties/useParties";
 import { usePartyAssignments } from "../features/parties/usePartyAssignments";
 import { upsertParty, setPartyAssignments } from "../features/data/writeApi";
 
+// Helper to resolve the deployed data base URL
+function getDataBaseUrl() {
+  const env = (import.meta as any).env;
+  const base = (env && env.VITE_DATA_BASE_URL) ? String(env.VITE_DATA_BASE_URL) : "";
+  const trimmed = base.replace(/\/$/, "");
+  if (trimmed) return trimmed; // e.g. /cocktails2/data
+  // Fallback: infer from current location + '/data'
+  const path = (typeof window !== "undefined") ? window.location.pathname : "/";
+  const prefix = path.endsWith("/") ? path : (path + "/");
+  return prefix + "data";
+}
+
+function cacheBust(u: string) {
+  return u + (u.includes("?") ? "&" : "?") + "ts=" + Date.now();
+}
+
+async function generatePartyId(): Promise<PartyID> {
+  // short, collision-resistant id
+  let id = Math.random().toString(36).slice(2, 10);
+  let tries = 0;
+  while (tries < 5 && (await db.parties.get(id))) {
+    id = Math.random().toString(36).slice(2, 10);
+    tries++;
+  }
+  return id as PartyID;
+}
+
 export default function PartyManagerPage() {
   // Drinks: cache-first + refresh behaves like rest of app
   const { drinks } = useDrinks();
 
-  // Parties: new hook, cache-first + refresh from /data/parties.json
+  // Parties: hook (uses cache-first strategy)
   const { parties, reload: reloadParties } = useParties();
 
   const [selectedPartyId, setSelectedPartyId] = useState<PartyID | null>(null);
@@ -19,11 +46,11 @@ export default function PartyManagerPage() {
     [parties, selectedPartyId]
   );
 
-  // Assignments for selected party (cache-first + refresh from /data/partyDrinks.json)
+  // Assignments for selected party (cache-first + refresh)
   const { assignments, reload: reloadAssignments } = usePartyAssignments(selectedPartyId ?? undefined);
   const assignedSet = useMemo(() => new Set(assignments.map(r => r.drinkId)), [assignments]);
 
-  // Party form
+  // Party form (for editing existing)
   const [form, setForm] = useState<Partial<Party>>({ name: "", date: "", tagline: "", title: "" });
   useEffect(() => {
     if (selectedParty) {
@@ -36,28 +63,137 @@ export default function PartyManagerPage() {
     }
   }, [selectedPartyId]); // eslint-disable-line
 
-  async function createParty() {
-    const now = Date.now();
-    const id: PartyID = crypto.randomUUID().slice(0, 8);
-    const party: Party = {
-      id,
-      name: form.name?.trim() || "New Party",
-      date: form.date || null,
-      tagline: form.tagline || null,
-      title: form.title || form.name || "Party",
-      slug: makeSlug(form.title || form.name),
-      createdAt: now,
-      updatedAt: now,
-    };
+  // ⚡ Force refresh from canonical JSON, bypassing caches, then repopulate Dexie.
+  async function forceRefreshAll() {
+    const base = getDataBaseUrl();
+    try {
+      const [partiesRes, pdRes] = await Promise.all([
+        fetch(cacheBust(`${base}/parties.json`), { cache: "no-store" }),
+        fetch(cacheBust(`${base}/partyDrinks.json`), { cache: "no-store" }),
+      ]);
+      if (!partiesRes.ok) throw new Error(`Failed to fetch parties.json (${partiesRes.status})`);
+      if (!pdRes.ok) throw new Error(`Failed to fetch partyDrinks.json (${pdRes.status})`);
+      const partiesJson = await partiesRes.json();
+      const partyDrinksJson = await pdRes.json();
+      const partiesArr: any[] = Array.isArray(partiesJson) ? partiesJson : (partiesJson?.parties ?? []);
+      const partyDrinksArr: any[] = Array.isArray(partyDrinksJson) ? partyDrinksJson : (partyDrinksJson?.partyDrinks ?? []);
 
-    // local first (so UI updates immediately)
-    await db.parties.add(party);
-    setSelectedPartyId(id);
+      await db.transaction("rw", db.parties, db.partyDrinks, async () => {
+        await db.parties.clear();
+        await db.partyDrinks.clear();
 
-    // remote write (updates JSON via Lambda), then re-sync from JSON
-    await upsertParty({ id: party.id, party });
+        // Upsert parties
+        for (const p of partiesArr) {
+          const row: Party = {
+            id: String(p.id),
+            name: p.name ?? "",
+            date: p.date ?? null,
+            tagline: p.tagline ?? null,
+            title: p.title ?? p.name ?? "",
+            slug: p.slug ?? makeSlug(p.title ?? p.name ?? ""),
+            createdAt: p.createdAt ?? Date.now(),
+            updatedAt: p.updatedAt ?? Date.now(),
+          };
+          await db.parties.put(row);
+        }
 
-    await reloadParties();
+        // Upsert assignments
+        for (const r of partyDrinksArr) {
+          if (!r || r.partyId == null || r.drinkId == null) continue;
+          await db.partyDrinks.add({
+            partyId: String(r.partyId),
+            drinkId: String(r.drinkId),
+            addedAt: r.addedAt ?? Date.now(),
+          });
+        }
+      });
+
+      // Ask hooks to pull from Dexie again (their cache-first step will pick it up)
+      await reloadParties();
+      await reloadAssignments();
+    } catch (err: any) {
+      console.error(err);
+      alert("Force refresh failed: " + (err?.message || String(err)));
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // NEW PARTY DIALOG
+  // ────────────────────────────────────────────────────────────────────────────
+  const [newOpen, setNewOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDate, setNewDate] = useState("");
+  const [newTagline, setNewTagline] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const [duplicateFromSelected, setDuplicateFromSelected] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const nameRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (newOpen) setTimeout(() => nameRef.current?.focus(), 50);
+  }, [newOpen]);
+
+  function openNewDialog() {
+    setNewName("");
+    setNewDate("");
+    setNewTagline("");
+    setNewTitle("");
+    setDuplicateFromSelected(false);
+    setNewOpen(true);
+  }
+
+  function closeNewDialog() {
+    if (creating) return; // prevent closing while writing
+    setNewOpen(false);
+  }
+
+  async function confirmCreateParty() {
+    if (!newName.trim()) return;
+    setCreating(true);
+    try {
+      const id = await generatePartyId();
+      const now = Date.now();
+      const party: Party = {
+        id,
+        name: newName.trim(),
+        date: newDate ? newDate : null,
+        tagline: newTagline ? newTagline : null,
+        title: newTitle.trim() || newName.trim(),
+        slug: makeSlug(newTitle || newName),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // local first
+      await db.parties.add(party);
+
+      // duplicate assignments from selected party if requested
+      if (duplicateFromSelected && selectedPartyId) {
+        const rows = await db.partyDrinks.where("partyId").equals(selectedPartyId).toArray();
+        if (rows.length) {
+          await db.partyDrinks.bulkAdd(rows.map(r => ({ partyId: id, drinkId: r.drinkId, addedAt: Date.now() })));
+        }
+      }
+
+      setSelectedPartyId(id);
+
+      // remote write(s)
+      await upsertParty({ id: party.id, party });
+      if (duplicateFromSelected && selectedPartyId) {
+        const rows = await db.partyDrinks.where("partyId").equals(id).toArray();
+        const ids = rows.map(r => r.drinkId);
+        await setPartyAssignments(id, ids);
+      }
+
+      // hard re-sync from JSON
+      await forceRefreshAll();
+      setNewOpen(false);
+    } catch (err: any) {
+      console.error(err);
+      alert("Create party failed: " + (err?.message || String(err)));
+    } finally {
+      setCreating(false);
+    }
   }
 
   async function saveParty() {
@@ -75,27 +211,22 @@ export default function PartyManagerPage() {
     // local update
     await db.parties.put(updated);
 
-    // remote write + re-sync
-await upsertParty({ id: updated.id, party: updated });
-    await reloadParties();
+    // remote write + hard re-sync
+    await upsertParty({ id: updated.id, party: updated });
+    await forceRefreshAll();
   }
 
   // Batch-save current assignments to server JSON, like the Drinks editor flow
   async function saveAssignments() {
     if (!selectedPartyId) return;
 
-    // derive current selection from checkboxes in UI state
-    // (assignedSet already reflects Dexie; we recompute from the DOM list below)
-    const selectedDrinkIds = filteredDrinks.map(d => {
-      const id = d.slug ?? String(d.id);
-      return assignedSet.has(id) ? id : null;
-    }).filter(Boolean) as string[];
+    // Build from *all* drinks, not just filtered (so filtering doesn't drop hidden selections)
+    const allDrinkIds = (drinks ?? []).map((d: any) => d.slug ?? String(d.id));
+    const selectedDrinkIds = allDrinkIds.filter((id: string) => assignedSet.has(id));
 
-    // remote write (replaces that party’s list in JSON)
+    // remote write (replaces that party’s list in JSON), then hard re-sync
     await setPartyAssignments(selectedPartyId, selectedDrinkIds);
-
-    // local refresh from JSON
-    await reloadAssignments();
+    await forceRefreshAll();
   }
 
   // Toggle an assignment locally (immediate UX)
@@ -146,7 +277,7 @@ await upsertParty({ id: updated.id, party: updated });
           </select>
         </div>
 
-        <button className="rounded bg-black text-white px-3 py-2" onClick={createParty}>
+        <button className="rounded bg-black text-white px-3 py-2" onClick={openNewDialog} disabled={creating}>
           + New Party
         </button>
 
@@ -168,7 +299,7 @@ await upsertParty({ id: updated.id, party: updated });
 
           <div className="flex gap-2">
             <button className="rounded bg-black text-white px-3 py-2" onClick={saveParty}>Save Party</button>
-            <button className="rounded border px-3 py-2" onClick={() => reloadParties()}>Reload from JSON</button>
+            <button className="rounded border px-3 py-2" onClick={forceRefreshAll}>Force refresh from JSON</button>
           </div>
         </div>
       )}
@@ -199,6 +330,49 @@ await upsertParty({ id: updated.id, party: updated });
               );
             })}
           </ul>
+        </div>
+      )}
+
+      {/* New Party Modal */}
+      {newOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeNewDialog}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold mb-3">Create New Party</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <label className="block">
+                <div className="text-sm text-gray-700 mb-1">Name</div>
+                <input ref={nameRef} className="border rounded w-full px-2 py-1" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              </label>
+              <label className="block">
+                <div className="text-sm text-gray-700 mb-1">Date (YYYY-MM-DD)</div>
+                <input className="border rounded w-full px-2 py-1" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+              </label>
+              <label className="block sm:col-span-2">
+                <div className="text-sm text-gray-700 mb-1">Title (display)</div>
+                <input className="border rounded w-full px-2 py-1" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} />
+              </label>
+              <label className="block sm:col-span-2">
+                <div className="text-sm text-gray-700 mb-1">Tagline</div>
+                <input className="border rounded w-full px-2 py-1" value={newTagline} onChange={(e) => setNewTagline(e.target.value)} />
+              </label>
+            </div>
+
+            <label className="inline-flex items-center gap-2 mb-4">
+              <input type="checkbox" checked={duplicateFromSelected} onChange={(e) => setDuplicateFromSelected(e.target.checked)} />
+              <span className="text-sm">Duplicate drink assignments from the currently selected party</span>
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <button className="rounded border px-3 py-2" onClick={closeNewDialog} disabled={creating}>Cancel</button>
+              <button
+                className="rounded bg-black text-white px-3 py-2 disabled:opacity-50"
+                onClick={confirmCreateParty}
+                disabled={!newName.trim() || creating}
+              >
+                {creating ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
