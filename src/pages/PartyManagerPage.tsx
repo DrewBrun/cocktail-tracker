@@ -48,7 +48,14 @@ export default function PartyManagerPage() {
 
   // Assignments for selected party (cache-first + refresh)
   const { assignments, reload: reloadAssignments } = usePartyAssignments(selectedPartyId ?? undefined);
-  const assignedSet = useMemo(() => new Set(assignments.map(r => r.drinkId)), [assignments]);
+  const dbAssignedSet = useMemo(() => new Set(assignments.map(r => r.drinkId)), [assignments]);
+
+  // ✅ Pending selection state (decoupled from Dexie). Checkboxes update this only.
+  const [pendingAssigned, setPendingAssigned] = useState<Set<string>>(new Set());
+  // Sync pending from DB when the party (or its assignments) change
+  useEffect(() => {
+    setPendingAssigned(new Set(dbAssignedSet));
+  }, [selectedPartyId, assignments]);
 
   // Party form (for editing existing)
   const [form, setForm] = useState<Partial<Party>>({ name: "", date: "", tagline: "", title: "" });
@@ -216,29 +223,35 @@ export default function PartyManagerPage() {
     await forceRefreshAll();
   }
 
-  // Batch-save current assignments to server JSON, like the Drinks editor flow
+  // ✅ Save Assignments: commit PENDING → Dexie, then write JSON
   async function saveAssignments() {
     if (!selectedPartyId) return;
 
-    // Build from *all* drinks, not just filtered (so filtering doesn't drop hidden selections)
-    const allDrinkIds = (drinks ?? []).map((d: any) => d.slug ?? String(d.id));
-    const selectedDrinkIds = allDrinkIds.filter((id: string) => assignedSet.has(id));
+    const selectedDrinkIds = Array.from(pendingAssigned);
 
-    // remote write (replaces that party’s list in JSON), then hard re-sync
+    // Replace this party's assignments in Dexie with the pending set
+    await db.transaction("rw", db.partyDrinks, async () => {
+      const toDelete = await db.partyDrinks.where("partyId").equals(selectedPartyId).toArray();
+      await db.partyDrinks.bulkDelete(toDelete.map(r => [r.partyId, r.drinkId] as [string, string]));
+      if (selectedDrinkIds.length) {
+        await db.partyDrinks.bulkAdd(
+          selectedDrinkIds.map(id => ({ partyId: selectedPartyId, drinkId: id, addedAt: Date.now() }))
+        );
+      }
+    });
+
+    // Write canonical JSON via Lambda, then refresh
     await setPartyAssignments(selectedPartyId, selectedDrinkIds);
     await forceRefreshAll();
   }
 
-  // Toggle an assignment locally (immediate UX)
-  async function toggleAssignment(drinkId: string, checked: boolean) {
-    if (!selectedPartyId) return;
-    if (checked) {
-      const exists = await db.partyDrinks.where({ partyId: selectedPartyId, drinkId }).first();
-      if (!exists) await db.partyDrinks.add({ partyId: selectedPartyId, drinkId, addedAt: Date.now() });
-    } else {
-      const rows = await db.partyDrinks.where({ partyId: selectedPartyId, drinkId }).toArray();
-      await db.partyDrinks.bulkDelete(rows.map((r) => [r.partyId, r.drinkId] as [string, string]));
-    }
+  // Update pending selection when a checkbox changes (no DB writes here)
+  function togglePending(drinkId: string, checked: boolean) {
+    setPendingAssigned(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(drinkId); else next.delete(drinkId);
+      return next;
+    });
   }
 
   // Search
@@ -277,7 +290,7 @@ export default function PartyManagerPage() {
           </select>
         </div>
 
-        <button className="rounded bg-black text-white px-3 py-2" onClick={openNewDialog} disabled={creating}>
+        <button className="rounded bg-black text-white px-3 py-2" onClick={openNewDialog}>
           + New Party
         </button>
 
@@ -317,13 +330,13 @@ export default function PartyManagerPage() {
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
             {filteredDrinks.map((d: any) => {
               const drinkId = d.slug ?? String(d.id);
-              const isChecked = assignedSet.has(drinkId);
+              const isChecked = pendingAssigned.has(drinkId);
               return (
                 <li key={drinkId} className="flex items-center gap-2 py-1">
                   <input
                     type="checkbox"
                     checked={!!isChecked}
-                    onChange={(e) => toggleAssignment(drinkId, e.target.checked)}
+                    onChange={(e) => togglePending(drinkId, e.target.checked)}
                   />
                   <span className="truncate">{d.title ?? drinkId}</span>
                 </li>
